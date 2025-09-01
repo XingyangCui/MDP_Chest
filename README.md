@@ -5,8 +5,9 @@ A pipeline that after segmentation major anatomical structures by CT images, how
 
 ---
 #STEPS
-### 🔧 Step 1: Retrain the New Model
+### 🔧 Step 1: Preprocess data & Retrain Model.ipynb
 
+[code](https://github.com/XingyangCui/MDP_Chest/blob/main/1.Preprocess%20data%20%26%20Retrain%20Model.ipynb)
 
 ---
 
