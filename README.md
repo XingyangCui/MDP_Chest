@@ -21,20 +21,30 @@ Built-in evaluation & visualization for Dice scores per case and per rib
 ---
 
 ### 📁 Step 2: Predict the results by test cases
-
+- Apply the trained model to test CT scans
+- Export predicted segmentation maps
+- Filter out irrelevant structures (e.g., sternum, cartilage)
 [2.Predict_Test_Cases](https://github.com/XingyangCui/MDP_Chest/blob/main/2.Predict_Test_Cases.ipynb)
 
 
 ### ⚙️ Step 3: Merge_Ground_Truth_file
-
-
+- Merge individual rib ground truth masks into a single 3D volume
+- Optionally filter out noisy labels or non-rib structures
+- Output: a clean multi-label ground truth file for each case
 [3.Merge_Ground_Truth_file](https://github.com/XingyangCui/MDP_Chest/blob/main/3.Merge_Ground_Truth_file.ipynb)
 
 
 
 
 ### 🧠 Step 4: Sort Label and exclude noises
-
+- Apply 3D connected component analysis to predicted rib masks
+- Retain the top 24 largest components (i.e., 24 ribs)
+- Sort them anatomically by:
+- Side (left vs right, based on x-axis center)
+- Vertical position (superior to inferior)
+- Assign consistent labels:
+- rib_1 to rib_12 → right ribs,
+- rib_13 to rib_24 → left ribs
 [4.Sort Label and exclude noises](https://github.com/XingyangCui/MDP_Chest/blob/main/4.Sort%20Label%20and%20exclude%20noises.ipynb)
 
 
@@ -44,5 +54,6 @@ Built-in evaluation & visualization for Dice scores per case and per rib
 
 
 ### 🔍 Step 6: Predict on the Test Set
-
+- Compare predicted rib labels against ground truth masks
+- Compute Dice scores per rib, per case, and overall
 [6.Test_new_Dice_Scores.ipynb](https://github.com/XingyangCui/MDP_Chest/blob/main/6.Test_new_Dice_Scores.ipynb)
