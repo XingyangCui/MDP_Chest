@@ -1,12 +1,20 @@
 # MDP_Chest
 
+MDP_Chest is a modular pipeline designed to post-process segmentation results of major anatomical structures (especially the rib cage) from chest CT images. This pipeline focuses on resolving mislabeling, inconsistent rib ordering, and segmentation noise, ensuring anatomical consistency and enabling accurate downstream evaluation (e.g., Dice scores).
 
-A pipeline that after segmentation major anatomical structures by CT images, how to solver the mislabeling problems.  
+📌 Key Features
+Noise removal based on connected components
+Anatomical relabeling of ribs (1–24, right to left, superior to inferior)
+Re-mapping between predicted labels and ground truth
+Built-in evaluation & visualization for Dice scores per case and per rib
 
----
+
 #STEPS
 ### 🔧 Step 1: Preprocess data & Retrain Model.ipynb
-
+Preprocess original CT images (orientation, resampling, normalization)
+Organize datasets into nnUNet format with consistent label naming
+Fine-tune a segmentation model (e.g., TotalSegmentator) with custom ground truth
+Export model checkpoints for inference
 
 [1.Preprocess data & Retrain Model.ipynb](https://github.com/XingyangCui/MDP_Chest/blob/main/1.Preprocess%20data%20%26%20Retrain%20Model.ipynb)
 
