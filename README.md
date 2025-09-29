@@ -53,7 +53,7 @@ Built-in evaluation & visualization for Dice scores per case and per rib
 
 
 
-### 🔍 Step 6: Predict on the Test Set
+### 🔍 Step 6: Evaluate the Performance
 - Compare predicted rib labels against ground truth masks
 - Compute Dice scores per rib, per case, and overall
 [6.Test_new_Dice_Scores.ipynb](https://github.com/XingyangCui/MDP_Chest/blob/main/6.Test_new_Dice_Scores.ipynb)
