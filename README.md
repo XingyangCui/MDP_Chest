@@ -24,6 +24,7 @@ Built-in evaluation & visualization for Dice scores per case and per rib
 - Apply the trained model to test CT scans
 - Export predicted segmentation maps
 - Filter out irrelevant structures (e.g., sternum, cartilage)
+
 [2.Predict_Test_Cases](https://github.com/XingyangCui/MDP_Chest/blob/main/2.Predict_Test_Cases.ipynb)
 
 
@@ -31,6 +32,7 @@ Built-in evaluation & visualization for Dice scores per case and per rib
 - Merge individual rib ground truth masks into a single 3D volume
 - Optionally filter out noisy labels or non-rib structures
 - Output: a clean multi-label ground truth file for each case
+  
 [3.Merge_Ground_Truth_file](https://github.com/XingyangCui/MDP_Chest/blob/main/3.Merge_Ground_Truth_file.ipynb)
 
 
@@ -45,9 +47,11 @@ Built-in evaluation & visualization for Dice scores per case and per rib
 - Assign consistent labels:
 - rib_1 to rib_12 → right ribs,
 - rib_13 to rib_24 → left ribs,
+  
 - Then add another 2 labels:
 - 25: sternum
 - 26: costal_cartilages
+  
 [4.Sort Label and exclude noises](https://github.com/XingyangCui/MDP_Chest/blob/main/4.Sort%20Label%20and%20exclude%20noises.ipynb)
 
 
@@ -59,4 +63,5 @@ Built-in evaluation & visualization for Dice scores per case and per rib
 ### 🔍 Step 6: Evaluate the Performance
 - Compare predicted rib labels against ground truth masks
 - Compute Dice scores per rib, per case, and overall
+  
 [6.Test_new_Dice_Scores.ipynb](https://github.com/XingyangCui/MDP_Chest/blob/main/6.Test_new_Dice_Scores.ipynb)
