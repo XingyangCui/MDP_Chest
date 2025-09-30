@@ -48,7 +48,7 @@ Built-in evaluation & visualization for Dice scores per case and per rib
 - rib_1 to rib_12 → right ribs,
 - rib_13 to rib_24 → left ribs,
   
-- Then add another 2 labels:
+- Then add other 2 labels:
 - 25: sternum
 - 26: costal_cartilages
   
