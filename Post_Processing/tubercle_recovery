@@ -42,10 +42,10 @@ SPINE_MID_TOL_MM     = 20.0     # how close to midline (x) to consider as spine
 SPINE_Z_EXT_MM       = 60.0     # min z-extent at high HU to accept as spine
 SPINE_CLEAR_MM       = 8.0      # NEW: corridor must be >= this far from spine
 
-# tiny smoothing on repaired rib only
+# Tiny smoothing on repaired rib only
 FINAL_CLOSING        = (8, 0, 8)  # voxel radii (x,y,z)
 
-# add gentle thickness to grown tip inside corridor + HU gate only
+# Add gentle thickness to grown tip inside corridor + HU gate only
 POST_THICKEN_MM      = 0
 
 # -------------------- helpers --------------------
@@ -187,7 +187,7 @@ def thicken_growth_in_corridor(ct, growth_u8, corridor_u8, lower, upper):
     thick = sitk.And(grown, sitk.And(corridor_u8, hu_ok))
     return thick
 
-def repair_first_rib(ct, rib_path, out_pre_path, out_final_path):
+def repair_first_rib(ct, rib_path, out_path):
     # load rib and align to CT grid
     rib_raw = read_img(rib_path)
     rib = to_u8(resample_like(to_u8(rib_raw), ct))
@@ -225,12 +225,11 @@ def repair_first_rib(ct, rib_path, out_pre_path, out_final_path):
         grow_union = sitk.Or(grow_union, sitk.Or(gA, gB))
 
     pre = sitk.Or(rib, grow_union)
-    write_img(pre, out_pre_path)
-    print(f"[OK] pre → {out_pre_path}")
 
+    # Refine (small, anisotropic closing) and write single output
     refined = sitk.BinaryMorphologicalClosing(pre, FINAL_CLOSING)
-    write_img(refined, out_final_path)
-    print(f"[OK] refined → {out_final_path}")
+    write_img(refined, out_path)
+    print(f"[OK] saved → {out_path}")
 
 # -------------------- file matching (only rib_left_1 / rib_right_1) --------------------
 STEM_RE = re.compile(r'^rib[-_](left|right)[-_]0?1$', re.I)
@@ -252,12 +251,14 @@ def list_first_ribs(ribs_dir: str):
                 hits.append(os.path.join(root, f))
     return hits
 
-# -------------------- your folder structure loop --------------------
+# -------------------------- Driver ---------------------------
 if __name__ == "__main__":
     base_dir = "/Users/chensirong/TotalSegmentator_postprocessing"
     totalSegmentator_data = os.path.join(base_dir, "TotalSegmentator_Data")
-    out_morph  = os.path.join(base_dir, "postprocessed_output", "before_smoothing")
-    out_refine = os.path.join(base_dir, "postprocessed_output", "refined")
+
+    # SINGLE output directory
+    out_dir  = os.path.join(base_dir, "postprocessed_output")
+    os.makedirs(out_dir, exist_ok=True)
 
     SUBJECT_PREFIXES = ("CF", "CM")
     subjects = sorted([
@@ -291,10 +292,9 @@ if __name__ == "__main__":
 
         for rib_path in sorted(rib_files):
             base = os.path.basename(rib_path).replace(".nii.gz", "").replace(".nii", "")
-            morph_out_path   = os.path.join(out_morph,  f"{subj}_{base}_postprocessed.nii.gz")
-            refined_out_path = os.path.join(out_refine, f"{subj}_{base}_postprocessed.nii.gz")
+            out_path = os.path.join(out_dir, f"{subj}_{base}_postprocessed.nii.gz")
             try:
-                repair_first_rib(ct, rib_path, morph_out_path, refined_out_path)
+                repair_first_rib(ct, rib_path, out_path)
             except Exception as e:
                 print(f"[ERROR] {subj}/{base}: {e}")
 
