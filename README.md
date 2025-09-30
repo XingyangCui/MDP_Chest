@@ -44,7 +44,10 @@ Built-in evaluation & visualization for Dice scores per case and per rib
 - Vertical position (superior to inferior)
 - Assign consistent labels:
 - rib_1 to rib_12 → right ribs,
-- rib_13 to rib_24 → left ribs
+- rib_13 to rib_24 → left ribs,
+- Then add another 2 labels:
+- 25: sternum
+- 26: costal_cartilages
 [4.Sort Label and exclude noises](https://github.com/XingyangCui/MDP_Chest/blob/main/4.Sort%20Label%20and%20exclude%20noises.ipynb)
 
 
