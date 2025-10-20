@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-# Only extend FIRST ribs (L/R) and write one file per rib to:
-#   postprocessed_output/<subj>_<ribfile>_postprocessed.nii.gz
-#
-# Goal: Apply Robust Growth ONLY to High-Confidence Missing Tubercle Ribs.
-#       Uses ULTRA-STRICT thresholds and HU floors for the right rib to ensure NO PROCESSING.
-
 import os
 import re
 import numpy as np
@@ -18,24 +11,17 @@ UPPER_HU = 1200.0
 NBHD_RADIUS_MM       = 12.0     # Inspection distance for a robust check
 NBHD_BONE_HU         = 600.0    # HU counted as "other dense bone" (vertebrae, joints)
 
-# CRITICAL: SIDE-SPECIFIC HARD CUTOFF THRESHOLDS
-# Cutoff for the problematic side (Left) - Allows recovery
 NBHD_BONE_FRAC_LEFT_CUTOFF  = 0.05 
-# Ultra-Stricter Cutoff for the non-problematic side (Right) - Designed to SKIP
-NBHD_BONE_FRAC_RIGHT_CUTOFF = 0.005   # ULTIMATE RESTRICTION (0.5% bone contamination max)
-
-# Strict anatomical filtering to isolate posterior tip
+NBHD_BONE_FRAC_RIGHT_CUTOFF = 0.005   
 POSTERIOR_Y_IDX_MIN_FRAC = 0.55 
 MIDLINE_X_TOL_MM         = 50.0 
 
-# Single Robust Growth Parameters (applied ONLY to filtered endpoints)
-PCTL_ROBUST          = 40       # More permissive HU percentile for robust recovery
-LOWER_PCTL_FLOOR_R   = 200.0    # Used for Left/Problematic Side
-R_RIB_MM_R           = 10.0     # Wider corridor for robust recovery
+PCTL_ROBUST          = 40      
+LOWER_PCTL_FLOOR_R   = 200.0    
+R_RIB_MM_R           = 10.0     
 R_TIP_MM_R           = 14.0
 
-# NEW: Stricter HU Floor for the Right Rib, overriding adaptive calculation
-LOWER_HU_RIGHT_MIN   = 400.0   # Enforce a much higher minimum HU for the right rib growth
+LOWER_HU_RIGHT_MIN   = 400.0  
 
 # Auto spine exclusion (mask vertebrae) + extra corridor clearance
 SPINE_HU             = 480.0
@@ -104,7 +90,6 @@ def build_spine_mask(ct):
             out = sitk.Or(out, to_u8(sitk.BinaryThreshold(cc, L, L, 1, 0)))
     return sitk.BinaryDilate(out, (1,1,1)) if arr(out).any() else out
 
-# Now accepts anatomical parameters
 def endpoint_is_posterior_missing_tubercle(ct, ribs_u8, ep_phys, nbhd_mm, bone_hu, y_frac_min, x_tol_mm):
     """
     Returns the fraction of 'other bone' (dense non-rib bone) in the neighborhood.
@@ -186,7 +171,7 @@ def keep_growth_touching_rib(grow_u8, rib_u8):
             out = sitk.Or(out, comp)
     return out
 
-# MODIFIED: Implements side-specific hard-cutoff and stricter HU floor strategy
+# Implements side-specific hard-cutoff and stricter HU floor strategy
 def repair_first_rib(ct, rib_path, out_path):
     rib_raw = read_img(rib_path)
     rib = to_u8(resample_like(to_u8(rib_raw), ct))
@@ -235,11 +220,9 @@ def repair_first_rib(ct, rib_path, out_path):
         return
 
     grow_union = sitk.Image(ct.GetSize(), sitk.sitkUInt8); grow_union.CopyInformation(ct)
-    
-    # Apply single, robust growth parameters
+
     pctl_val, _ = stats_percentiles_in_mask(ct, rib, (PCTL_ROBUST, 0))
     
-    # Use the stricter HU floor determined above
     lower_hu = max(pctl_val, target_hu_floor) 
     r_rib, r_tip = R_RIB_MM_R, R_TIP_MM_R
     print(f"[INFO] Applying Robust Growth (HU: {lower_hu:.1f}) to {len(growth_candidates)} endpoints.")
@@ -283,11 +266,10 @@ def list_first_ribs(ribs_dir: str):
 
 # -------------------------- Driver ---------------------------
 if __name__ == "__main__":
-    # NOTE: Update base_dir to your actual working directory
+    
     base_dir = "/Users/chensirong/TotalSegmentator_postprocessing"
     totalSegmentator_data = os.path.join(base_dir, "TotalSegmentator_Data")
 
-    # SINGLE output directory
     out_dir  = os.path.join(base_dir, "postprocessed_output")
     os.makedirs(out_dir, exist_ok=True)
 
@@ -331,7 +313,6 @@ if __name__ == "__main__":
             try:
                 repair_first_rib(ct, rib_path, out_path)
             except Exception as e:
-                # Capture any errors during processing
                 print(f"[ERROR] {subj}/{base}: {e}")
 
     print("\n🎉 All subjects processed!")
