@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 # Only extend FIRST ribs (L/R) and write one file per rib to:
-#   postprocessed_output/before_smoothing/<subj>_<ribfile>_postprocessed.nii.gz
-#   postprocessed_output/refined/<subj>_<ribfile>_postprocessed.nii.gz
+#   postprocessed_output/<subj>_<ribfile>_postprocessed.nii.gz
 #
-# Layout preserved:
-#   base_dir/TotalSegmentator_Data/CFxxxx/
-#       CFxxxx_resampled.nii.gz
-#       CFxxxx_test/  (contains rib_left_1.nii.gz, rib_right_1.nii.gz, etc.)
-#
-# No sternum needed. Growth is HU-gated, corridor-limited, and spine-excluded.
+# Goal: Apply Robust Growth ONLY to High-Confidence Missing Tubercle Ribs.
+#       Uses ULTRA-STRICT thresholds and HU floors for the right rib to ensure NO PROCESSING.
 
 import os
 import re
@@ -16,37 +11,40 @@ import numpy as np
 import SimpleITK as sitk
 from scipy.ndimage import convolve
 
-# -------------------- knobs (tuned for longer, thicker, spine-safe tips) --------------------
+# -------------------- knobs (tuned for robust recovery / NO OVERSEGMENTATION) --------------------
 UPPER_HU = 1200.0
 
-# classify anterior tips vs posterior (avoid spine-side endpoints)
-NBHD_RADIUS_MM       = 9.0      # small ball around endpoint to inspect neighbors
+# Classify posterior endpoints vs anterior (target spine-side endpoints)
+NBHD_RADIUS_MM       = 12.0     # Inspection distance for a robust check
 NBHD_BONE_HU         = 600.0    # HU counted as "other dense bone" (vertebrae, joints)
-NBHD_BONE_FRAC_MAX   = 0.05     # max fraction of such bone allowed near endpoint
 
-# Tier A (cortical growth): long reach, strict HU to avoid spine
-A_LOWER_FLOOR        = 460.0    # keep hard-bone safe; raise if any spine creep
-A_PCTL               = 40       # percentile of in-rib HU (lower bound = max(A_PCTL, A_LOWER_FLOOR))
-A_R_RIB_MM           = 0.0     # distance band from rib surface (distance map, mm)
-A_R_TIP_MM           = 0.0     # sphere around endpoint (mm)
+# CRITICAL: SIDE-SPECIFIC HARD CUTOFF THRESHOLDS
+# Cutoff for the problematic side (Left) - Allows recovery
+NBHD_BONE_FRAC_LEFT_CUTOFF  = 0.05 
+# Ultra-Stricter Cutoff for the non-problematic side (Right) - Designed to SKIP
+NBHD_BONE_FRAC_RIGHT_CUTOFF = 0.005   # ULTIMATE RESTRICTION (0.5% bone contamination max)
 
-# Tier B (cartilage rounding): short range, permissive HU for tip rounding
-B_LOWER_FLOOR        = 180.0
-B_PCTL               = 25
-B_R_RIB_MM           = 12.0
-B_R_TIP_MM           = 16.0
+# Strict anatomical filtering to isolate posterior tip
+POSTERIOR_Y_IDX_MIN_FRAC = 0.55 
+MIDLINE_X_TOL_MM         = 50.0 
+
+# Single Robust Growth Parameters (applied ONLY to filtered endpoints)
+PCTL_ROBUST          = 40       # More permissive HU percentile for robust recovery
+LOWER_PCTL_FLOOR_R   = 200.0    # Used for Left/Problematic Side
+R_RIB_MM_R           = 10.0     # Wider corridor for robust recovery
+R_TIP_MM_R           = 14.0
+
+# NEW: Stricter HU Floor for the Right Rib, overriding adaptive calculation
+LOWER_HU_RIGHT_MIN   = 400.0   # Enforce a much higher minimum HU for the right rib growth
 
 # Auto spine exclusion (mask vertebrae) + extra corridor clearance
 SPINE_HU             = 480.0
-SPINE_MID_TOL_MM     = 20.0     # how close to midline (x) to consider as spine
-SPINE_Z_EXT_MM       = 60.0     # min z-extent at high HU to accept as spine
-SPINE_CLEAR_MM       = 8.0      # NEW: corridor must be >= this far from spine
+SPINE_MID_TOL_MM     = 20.0     
+SPINE_Z_EXT_MM       = 60.0     
+SPINE_CLEAR_MM       = 8.0      
 
 # Tiny smoothing on repaired rib only
 FINAL_CLOSING        = (8, 0, 8)  # voxel radii (x,y,z)
-
-# Add gentle thickness to grown tip inside corridor + HU gate only
-POST_THICKEN_MM      = 0
 
 # -------------------- helpers --------------------
 def read_img(p): return sitk.ReadImage(p)
@@ -104,25 +102,42 @@ def build_spine_mask(ct):
         z_extent_mm = sz*sp[2]
         if abs(cx - mid_x_phys) <= SPINE_MID_TOL_MM and z_extent_mm >= SPINE_Z_EXT_MM:
             out = sitk.Or(out, to_u8(sitk.BinaryThreshold(cc, L, L, 1, 0)))
-    # a hair of dilation to be conservative
     return sitk.BinaryDilate(out, (1,1,1)) if arr(out).any() else out
 
-def endpoint_is_anterior(ct, ribs_u8, ep_phys, nbhd_mm, bone_hu, frac_max):
-    """Accept endpoint if neighborhood has limited other-dense-bone (not rib)."""
-    idx = ct.TransformPhysicalPointToIndex(ep_phys)
+# Now accepts anatomical parameters
+def endpoint_is_posterior_missing_tubercle(ct, ribs_u8, ep_phys, nbhd_mm, bone_hu, y_frac_min, x_tol_mm):
+    """
+    Returns the fraction of 'other bone' (dense non-rib bone) in the neighborhood.
+    Returns 1.0 if not anatomically posterior/midline (no growth needed).
+    """
     sp = ct.GetSpacing()
+    idx = ct.TransformPhysicalPointToIndex(ep_phys)
+    X, Y, Z = ct.GetSize()
+    
+    # --- 1. Anatomical Position Check (Strict Posterior) ---
+    mid_y_idx = Y * y_frac_min
+    is_posterior_y = idx[1] >= mid_y_idx
+
+    mid_x_phys = ct.GetOrigin()[0] + sp[0] * (X / 2.0)
+    is_near_midline_x = abs(ep_phys[0] - mid_x_phys) <= x_tol_mm
+    
+    if not (is_posterior_y and is_near_midline_x):
+        return 1.0
+
+    # --- 2. Neighborhood Bone Fraction Check ---
     rx = max(1, int(round(nbhd_mm/sp[0])))
     ry = max(1, int(round(nbhd_mm/sp[1])))
     rz = max(1, int(round(nbhd_mm/sp[2])))
-    X,Y,Z = ct.GetSize()
     x0,x1 = max(0, idx[0]-rx), min(X-1, idx[0]+rx)
     y0,y1 = max(0, idx[1]-ry), min(Y-1, idx[1]+ry)
     z0,z1 = max(0, idx[2]-rz), min(Z-1, idx[2]+rz)
     ct_a  = arr(ct); rib_a = arr(ribs_u8)
     roi_ct  = ct_a[z0:z1+1, y0:y1+1, x0:x1+1]
     roi_rib = rib_a[z0:z1+1, y0:y1+1, x0:x1+1]
+    
     other_bone = (roi_ct >= bone_hu) & (roi_rib == 0)
-    return other_bone.mean() <= frac_max
+
+    return other_bone.mean()
 
 def corridor_for_tip(ribs_u8, spine_u8, ep_phys, r_rib_mm, r_tip_mm, ct=None):
     """Corridor = near-rib band ∩ endpoint sphere ∩ spine-clearance."""
@@ -142,8 +157,7 @@ def corridor_for_tip(ribs_u8, spine_u8, ep_phys, r_rib_mm, r_tip_mm, ct=None):
     cor = sitk.And(near_rib, sphere)
 
     if arr(spine_u8).any():
-        # explicit spine clearance in mm using distance map
-        d_spine = dist_map_mm(spine_u8)   # outside is positive
+        d_spine = dist_map_mm(spine_u8)
         spine_clear = to_u8(d_spine >= SPINE_CLEAR_MM)
         cor = sitk.And(cor, spine_clear)
 
@@ -153,7 +167,6 @@ def region_grow_local(ct, seeds_phys, lo, hi, corridor_u8):
     """ConnectedThreshold inside corridor only."""
     if not seeds_phys:
         empty = sitk.Image(ct.GetSize(), sitk.sitkUInt8); empty.CopyInformation(ct); return empty
-    # mask out everything outside the corridor (very low HU)
     ct_masked = sitk.Mask(ct, corridor_u8, outsideValue=-2000.0)
     seed_idx = [ct.TransformPhysicalPointToIndex(p) for p in seeds_phys]
     rg = sitk.ConnectedThreshold(ct_masked, seedList=seed_idx, lower=lo, upper=hi)
@@ -173,62 +186,79 @@ def keep_growth_touching_rib(grow_u8, rib_u8):
             out = sitk.Or(out, comp)
     return out
 
-def thicken_growth_in_corridor(ct, growth_u8, corridor_u8, lower, upper):
-    """Dilate grown tip slightly, but clamp to corridor and HU range."""
-    if not arr(growth_u8).any():
-        return growth_u8
-    sp = ct.GetSpacing()
-    rad = (max(1,int(round(POST_THICKEN_MM/sp[0]))),
-           max(1,int(round(POST_THICKEN_MM/sp[1]))),
-           max(0,int(round(POST_THICKEN_MM/sp[2]))))
-    grown = sitk.BinaryDilate(growth_u8, rad)
-
-    hu_ok = to_u8(sitk.And(ct >= lower, ct <= upper))
-    thick = sitk.And(grown, sitk.And(corridor_u8, hu_ok))
-    return thick
-
+# MODIFIED: Implements side-specific hard-cutoff and stricter HU floor strategy
 def repair_first_rib(ct, rib_path, out_path):
-    # load rib and align to CT grid
     rib_raw = read_img(rib_path)
     rib = to_u8(resample_like(to_u8(rib_raw), ct))
-
-    # adaptive HU bounds from this rib only
-    p20, p40 = stats_percentiles_in_mask(ct, rib, (B_PCTL, A_PCTL))
-    a_lower = max(p40, A_LOWER_FLOOR)
-    b_lower = max(p20, B_LOWER_FLOOR)
-    print(f"[INFO] {os.path.basename(rib_path)} → Tier-A lower={a_lower:.1f}, Tier-B lower={b_lower:.1f}")
-
     spine = build_spine_mask(ct)
 
-    # endpoints → keep only anterior-like
+    rib_filename = os.path.basename(rib_path)
+    
+    # -------------------- SIDE-SPECIFIC CUTOFF AND HU SELECTION --------------------
+    if "rib_right_1" in rib_filename:
+        # Ultra-Stricter constraints for the non-problematic side (Right)
+        active_cutoff = NBHD_BONE_FRAC_RIGHT_CUTOFF
+        side_tag = "Right"
+        # Use a high fixed floor to prevent aggressive HU growth
+        target_hu_floor = LOWER_HU_RIGHT_MIN 
+    else:
+        # Standard constraints for the problematic side (Left)
+        active_cutoff = NBHD_BONE_FRAC_LEFT_CUTOFF
+        side_tag = "Left"
+        # Use the standard adaptive floor
+        target_hu_floor = LOWER_PCTL_FLOOR_R 
+    # -------------------------------------------------------------------------------
+
     skel = skeleton(rib)
     endpoints = endpoints_from_skeleton(skel)
-    ant_seeds = [ep for ep in endpoints
-                 if endpoint_is_anterior(ct, rib, ep, NBHD_RADIUS_MM, NBHD_BONE_HU, NBHD_BONE_FRAC_MAX)]
-    print(f"[INFO] {os.path.basename(rib_path)} → endpoints: {len(endpoints)}, anterior-like: {len(ant_seeds)}")
+    
+    growth_candidates = []
+    for ep in endpoints:
+        # Pass required anatomical parameters
+        frac = endpoint_is_posterior_missing_tubercle(
+            ct, rib, ep, NBHD_RADIUS_MM, NBHD_BONE_HU, 
+            POSTERIOR_Y_IDX_MIN_FRAC, MIDLINE_X_TOL_MM
+        )
+        
+        # HARD CUTOFF: Only process if the dense bone fraction is extremely low
+        if frac <= active_cutoff:
+             growth_candidates.append((ep, frac))
+
+    print(f"[INFO] {rib_filename} ({side_tag}) → endpoints: {len(endpoints)}, Candidates for Robust Growth (frac<={active_cutoff:.3f}): {len(growth_candidates)}")
+
+    # -------------------- CRITICAL BLOCK: SKIP IF NO HIGH-CONFIDENCE NEED --------------------
+    if not growth_candidates:
+        # Write the ORIGINAL SEGMENTATION and exit. This prevents any oversegmentation.
+        print(f"[SKIP] No high-confidence missing tubercles found. Writing original segmentation.")
+        # Ensure the original image (before resampling/casting) is written
+        write_img(rib_raw, out_path) 
+        return
 
     grow_union = sitk.Image(ct.GetSize(), sitk.sitkUInt8); grow_union.CopyInformation(ct)
+    
+    # Apply single, robust growth parameters
+    pctl_val, _ = stats_percentiles_in_mask(ct, rib, (PCTL_ROBUST, 0))
+    
+    # Use the stricter HU floor determined above
+    lower_hu = max(pctl_val, target_hu_floor) 
+    r_rib, r_tip = R_RIB_MM_R, R_TIP_MM_R
+    print(f"[INFO] Applying Robust Growth (HU: {lower_hu:.1f}) to {len(growth_candidates)} endpoints.")
 
-    for ep in ant_seeds:
-        # Tier A: long, strict
-        corA = corridor_for_tip(rib, spine, ep, A_R_RIB_MM, A_R_TIP_MM, ct)
-        gA   = region_grow_local(ct, [ep], a_lower, UPPER_HU, corA)
-        gA   = keep_growth_touching_rib(gA, rib)
-        gA   = thicken_growth_in_corridor(ct, gA, corA, a_lower, UPPER_HU)
+    for ep, frac in growth_candidates:
+        # Execute Robust Growth
+        corridor = corridor_for_tip(rib, spine, ep, r_rib, r_tip, ct)
+        growth   = region_grow_local(ct, [ep], lower_hu, UPPER_HU, corridor)
+        growth   = keep_growth_touching_rib(growth, rib)
 
-        # Tier B: short, permissive (rounding)
-        corB = corridor_for_tip(rib, spine, ep, B_R_RIB_MM, B_R_TIP_MM, ct)
-        gB   = region_grow_local(ct, [ep], b_lower, UPPER_HU, corB)
-        gB   = keep_growth_touching_rib(gB, rib)
-        gB   = thicken_growth_in_corridor(ct, gB, corB, b_lower, UPPER_HU)
-
-        grow_union = sitk.Or(grow_union, sitk.Or(gA, gB))
+        grow_union = sitk.Or(grow_union, growth)
 
     pre = sitk.Or(rib, grow_union)
 
     # Refine (small, anisotropic closing) and write single output
     refined = sitk.BinaryMorphologicalClosing(pre, FINAL_CLOSING)
-    write_img(refined, out_path)
+    # Resample back to original rib space
+    refined_out = resample_like(refined, rib_raw)
+    write_img(refined_out, out_path)
     print(f"[OK] saved → {out_path}")
 
 # -------------------- file matching (only rib_left_1 / rib_right_1) --------------------
@@ -253,6 +283,7 @@ def list_first_ribs(ribs_dir: str):
 
 # -------------------------- Driver ---------------------------
 if __name__ == "__main__":
+    # NOTE: Update base_dir to your actual working directory
     base_dir = "/Users/chensirong/TotalSegmentator_postprocessing"
     totalSegmentator_data = os.path.join(base_dir, "TotalSegmentator_Data")
 
@@ -288,7 +319,11 @@ if __name__ == "__main__":
             print(f"[INFO] Found ribs: {[os.path.basename(p) for p in rib_files]}")
 
         # read CT once
-        ct = to_f32(read_img(ct_path))
+        try:
+            ct = to_f32(read_img(ct_path))
+        except Exception as e:
+            print(f"[ERROR] Could not read CT for {subj}: {e}")
+            continue
 
         for rib_path in sorted(rib_files):
             base = os.path.basename(rib_path).replace(".nii.gz", "").replace(".nii", "")
@@ -296,6 +331,7 @@ if __name__ == "__main__":
             try:
                 repair_first_rib(ct, rib_path, out_path)
             except Exception as e:
+                # Capture any errors during processing
                 print(f"[ERROR] {subj}/{base}: {e}")
 
     print("\n🎉 All subjects processed!")
