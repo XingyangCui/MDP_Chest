@@ -60,3 +60,14 @@ Built-in evaluation & visualization for Dice scores per case and per rib
 - Compute Dice scores per rib, per case, and overall
   
 [6.Test_new_Dice_Scores.ipynb](https://github.com/XingyangCui/MDP_Chest/blob/main/Retraining/6.Test_new_Dice_Scores.ipynb)
+
+### 🩻 Step 6: Post-Processing
+- Refine segmentation results from the retrained model to remove noise and recover missing rib structures.  
+- **`sternum_noise_reduction.py`** – Removes small disconnected artifacts around the sternum and keeps only the main connected component. *(Run for every subject)*  
+- **`tubercle_recovery.py`** – Detects and fills missing posterior rib tubercles (especially near the spine) using a conservative, confidence-based region-growing method. *(Run for every subject)*  
+- **`smoothing.py`** – Optionally smooths rib surfaces to reduce jagged edges and improve visual quality.  
+- **`b2b.py`** – Repairs large rib gaps using box-to-box filling; requires manual endpoint selection and should be used selectively.  
+
+**Typical Use:**  
+Run `sternum_noise_reduction.py` and `tubercle_recovery.py` for all subjects, then optionally apply `smoothing.py` or `b2b.py` if needed.
+
