@@ -38,7 +38,7 @@ Built-in evaluation & visualization for Dice scores per case and per rib
 
 
 
-### 🧠 Step 4: Sort Label and exclude noises
+### 🧠 Step 4: Sort Label, exclude noises and Relabel
 - Apply 3D connected component analysis to predicted rib masks
 - Retain the top 24 largest components (i.e., 24 ribs)
 - Sort them anatomically by:
@@ -55,12 +55,7 @@ Built-in evaluation & visualization for Dice scores per case and per rib
 [4.Sort Label and exclude noises](https://github.com/XingyangCui/MDP_Chest/blob/main/Retraining/4.Sort%20Label%20and%20exclude%20noises.ipynb)
 
 
-### 🧠 Step 5: Relabel(not mandatory)
-
-
-
-
-### 🔍 Step 6: Evaluate the Performance
+### 🔍 Step 5: Evaluate the Performance
 - Compare predicted rib labels against ground truth masks
 - Compute Dice scores per rib, per case, and overall
   
